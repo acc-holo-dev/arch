@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Network utilities
-
 set -euo pipefail
 
 require_command() {

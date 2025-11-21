@@ -1,64 +1,71 @@
 # Arch Installer (modular)
 
-Этот проект собирает воспроизводимый установщик Arch Linux с модульными стадиями и настраиваемым списком пакетов. Цель — быстро поднять систему с Hyprland (AMD CPU + iGPU + NVIDIA dGPU), но конфигурация остаётся универсальной и управляется одним файлом `config.sh`.
+Проект собирает воспроизводимый установщик Arch Linux с чёткой модульной структурой, YAML-конфигом и CLI-оркестратором. Цель — быстро поднимать систему (по умолчанию профиль `desktop` с Hyprland), сохраняя безопасность, идемпотентность и расширяемость.
 
-## Требования
-- Запуск из live-среды Arch/archiso с root-доступом.
-- Доступ в интернет для установки пакетов и AUR.
-- UEFI-система (используется `bootctl`).
-- Инструменты: `pacstrap`, `parted`, `lsblk`, `arch-chroot`, `git` (для AUR).
+## Новая структура
+- `cli/` — единый вход (`install.sh`) с опциями `--dry-run`, `--stage`, `--profile`, `--log-level`, `--log-file`.
+- `core/` — общие библиотеки: логирование, ошибки, промпты, сеть, железо, загрузка конфигурации.
+- `stages/` — по сценарию на стадию (`preflight`, `disk`, `system`, `apps`, `postinstall`, `aur`), каждый экспортирует `run_stage`.
+- `config/` — декларативный `config.yaml` + генератор `generate.sh` → `generated.sh` (bash-окружение).
+- `hooks/` — хуки `hooks/<stage>/{before,after}.d/*.sh` (исполняемые файлы выполняются по сортировке).
+- `tests/` — дымовой тест `smoke.sh` (dry-run preflight).
+- `dist/` — артефакты сборки (`make package`).
 
-## Быстрый старт (live-окружение archiso)
+## Быстрый старт (live Arch)
 ```bash
-# 1) Подключите сеть
+# 1) Сеть
 #    Wi‑Fi: iwctl station wlan0 connect MyWiFi
 #    Ethernet: ip link set eth0 up && dhcpcd eth0
 
-# 2) Синхронизируйте время
-timedatectl set-ntp true
+# 2) Синхронизация времени
+ timedatectl set-ntp true
 
-# 3) Получите исходники
+# 3) Получение исходников
 pacman -Sy --noconfirm git
-git clone https://github.com/arch-installer/modular-arch.git arch-installer
-cd arch-installer
+ git clone https://github.com/arch-installer/modular-arch.git arch-installer
+ cd arch-installer
 
-# 4) Настройте конфиг
-nano config.sh
+# 4) Подготовка конфигурации
+nano config/config.yaml
+./config/generate.sh
 
-# 5) Сухой прогон без изменений на диске
-bin/install.sh --dry-run
+# 5) Сухой прогон всего пайплайна
+./cli/install.sh --dry-run
 
-# 6) Полная установка (внимательно проверьте TARGET_DISK)
-bin/install.sh
-
-# 7) Запуск только одной стадии (например, apps)
-bin/install.sh --stage apps
+# 6) Запуск только одной стадии
+./cli/install.sh --dry-run --stage apps --profile desktop
 ```
 
-## Настройка через `config.sh`
-Все пакеты, службы и базовые параметры вынесены в корневой файл [`config.sh`](config.sh). В нём можно:
-- изменить пользователя/хостнейм и корневую точку монтирования;
-- включать/выключать группы пакетов (Hyprland, разработка, шрифты, gaming, виртуализация);
-- задать списки системных сервисов и AUR-пакетов;
-- добавить свои наборы пакетов в массивы `PACMAN_*` и `AUR_*`.
+## Конфигурация через `config/config.yaml`
+- Раздел `install`: корень установки, диск, пользователь, профиль по умолчанию.
+- Разделы `packages.pacman` и `packages.aur`: группы пакетов.
+- `profiles`: наборы групп и флаги (`ENABLE_*`) для разных сценариев (например, `desktop`, `minimal`).
+- `services`: системные сервисы для автозапуска.
 
-После правок достаточно снова запустить `bin/install.sh` — модули автоматически подхватят настройки.
+Запуск `config/generate.sh` создаёт `config/generated.sh` с bash-массивами (`PACMAN_GROUP_*`, `AUR_GROUP_*`, `PROFILE_*`). CLI автоматически пересобирает кеш, если YAML новее.
 
-## Структура стадий
-- **preflight** — проверка окружения, времени, сети и готовности к работе в UEFI.
-- **disk** — разметка целевого диска, форматы и монтирование под `/mnt`.
-- **system** — `pacstrap`, генерация `fstab`, локали/таймзона, загрузчик, гостевые драйверы.
-- **apps** — установка основных пользовательских и графических пакетов (в т.ч. Hyprland) с учётом GPU/виртуализации.
-- **postinstall** — создание пользователя, sudo, хостнейм, включение системных сервисов.
-- **aur** — установка `yay` и пользовательских AUR-пакетов от имени созданного пользователя.
+## Стадии и безопасность
+- **preflight** — root-права, UEFI, сеть, NTP, SMART (при наличии), обязательный `set -euo pipefail`.
+- **disk** — двойное подтверждение перед wipe, whitelisting через `TARGET_DISK`, поддержка dry-run.
+- **system** — `pacstrap`, `fstab`, локали, hostname, микрокод и GPU/virt пакеты.
+- **apps** — pacman-пакеты по профилю + GPU дополнения.
+- **postinstall** — создание пользователя, sudo, включение сервисов.
+- **aur** — установка `yay` и AUR-пакетов по профилю + GPU-ветки.
+
+Каждая стадия идемпотентна в части проверок, принимает `INSTALL_DRY_RUN` и использует общий логгер. Хуки `before/after` позволяют добавлять шаги без правки ядра.
 
 ## Makefile
-- `make lint` / `make shellcheck` — статический анализ скриптов.
-- `make run` — сухой прогон через `bin/install.sh --dry-run`.
-- `make package` — сборка архива `dist/arch-installer.tar.gz`.
+- `make config` — генерация `config/generated.sh`.
+- `make lint`/`make shellcheck` — статический анализ.
+- `make format` — форматирование `shfmt`.
+- `make test` — дымовой тест (dry-run preflight).
+- `make run` — полный dry-run.
+- `make package` — архив в `dist/arch-installer.tar.gz`.
 
-## Логи и диагностика
-Логи пишутся в `logs/install-*.log` (или в `/tmp/arch-install-*.log`, если папка недоступна). Уровень логирования выбирается через `--log-level`.
+## Безопасный запуск
+- Всегда начинайте с `--dry-run` и проверяйте лог (`logs/install-*.log`).
+- Перед стадией `disk` убедитесь, что `TARGET_DISK` в YAML указывает на нужное устройство.
+- В live-окружении должны быть доступны `pacstrap`, `parted`, `lsblk`, `arch-chroot`, `git`, `systemd-boot`.
 
-## Безопасность
-Стадия `disk` выполняет разрушительные операции. Для реального запуска убедитесь, что `TARGET_DISK` в `config.sh` указывает на нужный диск и что сухой прогон прошёл без ошибок.
+## Минимальные зависимости
+- Bash, coreutils, `python` (для генерации bash-конфига из YAML/JSON), `pacstrap`, `parted`, `lsblk`, `arch-chroot`, `git`, `systemd-boot`.

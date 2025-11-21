@@ -1,18 +1,27 @@
 SHELL := /usr/bin/env bash
 PROJECT_ROOT := $(shell pwd)
-SOURCES := $(shell find bin lib modules -name '*.sh') config.sh
+SOURCES := $(shell find cli core stages -name '*.sh') config/config.yaml config/generate.sh
 
-.PHONY: lint shellcheck run package
+.PHONY: lint shellcheck format test run package config
 
 lint: shellcheck
 
 shellcheck:
 	@shellcheck $(SOURCES)
 
-run:
-	@$(PROJECT_ROOT)/bin/install.sh --dry-run
+format:
+	@shfmt -w $(SOURCES)
 
-package:
+config:
+	@$(PROJECT_ROOT)/config/generate.sh
+
+test: config
+	@bash tests/smoke.sh
+
+run: config
+	@$(PROJECT_ROOT)/cli/install.sh --dry-run
+
+package: config
 	@mkdir -p dist
-	@tar czf dist/arch-installer.tar.gz bin lib modules docs config.sh README.md Makefile .gitignore
+	@tar czf dist/arch-installer.tar.gz cli core stages config docs README.md Makefile bin hooks tests
 	@echo "Created dist/arch-installer.tar.gz"

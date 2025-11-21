@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Logging utilities
-
+# Centralized logging helpers
 set -euo pipefail
 
 : "${INSTALL_LOG_LEVEL:=INFO}"
-: "${INSTALL_LOG_FILE:=}"   # optional explicit file path
+: "${INSTALL_LOG_FILE:=}"
 
 __log_levels=(DEBUG INFO WARN ERROR)
 
@@ -34,7 +33,7 @@ log_set_level() {
 
 log_setup() {
   local desired_level="${1:-${INSTALL_LOG_LEVEL}}"
-  local log_dir="${2:-}"  # optional directory for log file
+  local log_dir="${2:-}"
   local timestamp
   timestamp="$(date +"%Y%m%d-%H%M%S")"
 
