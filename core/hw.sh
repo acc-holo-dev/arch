@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Hardware detection helpers
-
 set -euo pipefail
 
 : "${INSTALL_GPU:=unknown}"
@@ -19,7 +18,7 @@ detect_cpu() {
     INSTALL_CPU="$(lscpu | awk -F: '/Vendor ID/ {gsub(/ /, "", $2); print tolower($2)}')"
     case "${INSTALL_CPU}" in
       genuineintel) INSTALL_CPU="intel" ;;
-      authentica* | amd*) INSTALL_CPU="amd" ;;
+      authentica*|amd*) INSTALL_CPU="amd" ;;
       *) INSTALL_CPU="unknown" ;;
     esac
   else
@@ -70,9 +69,27 @@ hw_aur_gpu_packages() {
   local -n _out=$1
   _out=()
   case "${INSTALL_GPU}" in
-    amd) [[ ${#AUR_AMD_GPU[@]:-0} -gt 0 ]] && _out+=("${AUR_AMD_GPU[@]}") ;;
-    intel) [[ ${#AUR_INTEL_GPU[@]:-0} -gt 0 ]] && _out+=("${AUR_INTEL_GPU[@]}") ;;
-    nvidia) [[ ${#AUR_NVIDIA_GPU[@]:-0} -gt 0 ]] && _out+=("${AUR_NVIDIA_GPU[@]}") ;;
+    amd)
+      if declare -p AUR_GROUP_AMD_GPU >/dev/null 2>&1; then
+        _out+=("${AUR_GROUP_AMD_GPU[@]}")
+      elif [[ ${#AUR_AMD_GPU[@]:-0} -gt 0 ]]; then
+        _out+=("${AUR_AMD_GPU[@]}")
+      fi
+      ;;
+    intel)
+      if declare -p AUR_GROUP_INTEL_GPU >/dev/null 2>&1; then
+        _out+=("${AUR_GROUP_INTEL_GPU[@]}")
+      elif [[ ${#AUR_INTEL_GPU[@]:-0} -gt 0 ]]; then
+        _out+=("${AUR_INTEL_GPU[@]}")
+      fi
+      ;;
+    nvidia)
+      if declare -p AUR_GROUP_NVIDIA_GPU >/dev/null 2>&1; then
+        _out+=("${AUR_GROUP_NVIDIA_GPU[@]}")
+      elif [[ ${#AUR_NVIDIA_GPU[@]:-0} -gt 0 ]]; then
+        _out+=("${AUR_NVIDIA_GPU[@]}")
+      fi
+      ;;
   esac
 }
 
