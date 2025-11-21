@@ -146,10 +146,22 @@ prompt_password() {
 }
 
 choose_disk() {
-  info "Available disks:"
-  lsblk -dpno NAME,SIZE,TYPE | grep "disk"
   local disk
   while true; do
+    info "Available disks:" >&2
+    local disks_output
+    disks_output=$(lsblk -dpno NAME,SIZE,TYPE | grep "disk" || true)
+
+    if [[ -z "$disks_output" ]]; then
+      warn "No disks detected, please check the connection" >&2
+      read -rp "Rescan for disks? (yes/NO): " rescan
+      if [[ "$rescan" != "yes" ]]; then
+        warn "Connect a disk and try again" >&2
+      fi
+      continue
+    fi
+
+    echo "$disks_output" >&2
     read -rp "Enter target disk (e.g., /dev/sda): " disk
     if [[ -b "$disk" ]]; then
       read -rp "All data on ${disk} will be wiped. Continue? (yes/NO): " confirm
