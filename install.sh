@@ -35,31 +35,31 @@ err() { echo -e "${RED}[ERROR]${NC} $1"; }
 # ------------------------------------------------------------
 # CHECK UEFI
 # ------------------------------------------------------------
-msg "Проверка UEFI…"
+msg "Checking for UEFI..."
 if [[ ! -d /sys/firmware/efi ]]; then
-    err "Система не запущена в режиме UEFI. Этот скрипт требует UEFI."
+    err "System is not booted in UEFI mode. This script requires UEFI."
     exit 1
 fi
-ok "UEFI найден."
+ok "UEFI detected."
 
 # ------------------------------------------------------------
 # CHECK INTERNET
 # ------------------------------------------------------------
-msg "Проверка интернет-соединения..."
+msg "Checking internet connectivity..."
 if ping -c 2 archlinux.org >/dev/null 2>&1; then
-    ok "Интернет работает."
+    ok "Internet connection is active."
 else
-    err "Интернет отсутствует. Подключите Wi-Fi вручную и запустите скрипт снова."
+    err "Internet connection is down. Connect Wi-Fi manually and rerun the script."
     exit 1
 fi
 
 # ------------------------------------------------------------
 # SELECT DISK
 # ------------------------------------------------------------
-msg "Выбор диска для установки:"
+msg "Select the target disk for installation:"
 lsblk -dpno NAME,SIZE,TYPE | grep "disk"
 echo
-read -rp "Введите диск (например nvme0n1 или /dev/nvme0n1): " DISK
+read -rp "Enter disk (e.g. nvme0n1 or /dev/nvme0n1): " DISK
 
 # normalize to /dev/...
 if [[ "$DISK" != /dev/* ]]; then
@@ -67,23 +67,23 @@ if [[ "$DISK" != /dev/* ]]; then
 fi
 
 if [ ! -b "$DISK" ]; then
-    err "Диск $DISK не найден."
+    err "Disk $DISK not found."
     exit 1
 fi
 
-DISK_TYPE=$(lsblk -no TYPE "$DISK")
+DISK_TYPE=$(lsblk -dn -o TYPE "$DISK")
 if [[ "$DISK_TYPE" != "disk" ]]; then
-    err "$DISK не является целым диском (TYPE=$DISK_TYPE). Укажи именно диск, не раздел."
+    err "$DISK is not a whole disk (TYPE=$DISK_TYPE). Please specify a disk, not a partition."
     exit 1
 fi
 
-msg "ВНИМАНИЕ: ВСЕ ДАННЫЕ НА $DISK БУДУТ УДАЛЕНЫ!"
-read -rp "Нажмите Enter для подтверждения или Ctrl+C для отмены..."
+msg "WARNING: ALL DATA ON $DISK WILL BE ERASED!"
+read -rp "Press Enter to confirm or Ctrl+C to cancel..."
 
 # ------------------------------------------------------------
 # MAKE PARTITIONS (GPT, EFI + ROOT)
 # ------------------------------------------------------------
-msg "Создаю разметку GPT..."
+msg "Creating GPT partition table..."
 sgdisk --zap-all "$DISK"
 sgdisk --clear \
     --new=1:0:+512M --typecode=1:ef00 --change-name=1:"EFI" \
@@ -98,11 +98,11 @@ else
     ROOT="${DISK}2"
 fi
 
-msg "Форматирую разделы..."
+msg "Formatting partitions..."
 mkfs.fat -F32 -n EFI "$EFI"
 mkfs.ext4 -L ROOT "$ROOT"
 
-msg "Монтирую корень..."
+msg "Mounting root filesystem..."
 mount "$ROOT" /mnt
 mkdir -p /mnt/boot
 mount "$EFI" /mnt/boot
@@ -110,7 +110,7 @@ mount "$EFI" /mnt/boot
 # ------------------------------------------------------------
 # CREATE SWAPFILE (20GB)
 # ------------------------------------------------------------
-msg "Создаю swapfile на 20GB..."
+msg "Creating 20GB swapfile..."
 dd if=/dev/zero of=/mnt/swapfile bs=1M count=20000 status=progress
 chmod 600 /mnt/swapfile
 mkswap /mnt/swapfile
@@ -119,14 +119,14 @@ swapon /mnt/swapfile
 # ------------------------------------------------------------
 # MIRROR OPTIMIZATION
 # ------------------------------------------------------------
-msg "Оптимизация зеркал (reflector, Russia)..."
+msg "Optimizing mirrors (reflector, Russia)..."
 pacman -Sy --noconfirm reflector
 reflector --country Russia --latest 10 --sort rate --save /etc/pacman.d/mirrorlist
 
 # ------------------------------------------------------------
 # INSTALL BASE SYSTEM (linux-zen)
 # ------------------------------------------------------------
-msg "Устанавливаю базовую систему (linux-zen)..."
+msg "Installing base system (linux-zen)..."
 pacstrap /mnt \
     base linux-zen linux-zen-headers linux-firmware base-devel \
     networkmanager nano amd-ucode intel-ucode efibootmgr git sudo \
@@ -135,14 +135,14 @@ pacstrap /mnt \
 # ------------------------------------------------------------
 # FSTAB
 # ------------------------------------------------------------
-msg "Генерация fstab..."
+msg "Generating fstab..."
 genfstab -U /mnt >> /mnt/etc/fstab
 echo "/swapfile none swap defaults 0 0" >> /mnt/etc/fstab
 
 # ------------------------------------------------------------
 # CREATE CHROOT INSTALLER
 # ------------------------------------------------------------
-msg "Создаю chroot-скрипт..."
+msg "Creating chroot setup script..."
 
 cat > /mnt/root/chroot-setup.sh << 'EOF'
 #!/bin/bash
@@ -156,11 +156,11 @@ err(){ echo -e "${RED}[ERROR]${NC} $1"; }
 # ------------------------------------------------------------
 # TIMEZONE & LOCALE
 # ------------------------------------------------------------
-msg "Настройка часового пояса..."
+msg "Configuring timezone..."
 ln -sf /usr/share/zoneinfo/Europe/Moscow /etc/localtime
 hwclock --systohc
 
-msg "Локализация..."
+msg "Configuring locale..."
 sed -i 's/#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
 sed -i 's/#ru_RU.UTF-8 UTF-8/ru_RU.UTF-8 UTF-8/' /etc/locale.gen
 locale-gen
@@ -168,7 +168,7 @@ locale-gen
 echo "LANG=en_US.UTF-8" > /etc/locale.conf
 echo "KEYMAP=us" > /etc/vconsole.conf
 
-msg "Настройка hostname..."
+msg "Setting hostname..."
 echo "arch" > /etc/hostname
 cat > /etc/hosts << EOFS
 127.0.0.1   localhost
@@ -179,13 +179,13 @@ EOFS
 # ------------------------------------------------------------
 # USER
 # ------------------------------------------------------------
-msg "Создание пользователя..."
-read -p "Введите имя пользователя: " USERNAME
+msg "Creating user..."
+read -p "Enter username: " USERNAME
 useradd -m -G wheel,video,audio,storage,input -s /bin/bash "$USERNAME"
 
-echo "Введите пароль root:"
+echo "Enter root password:"
 passwd
-echo "Введите пароль пользователя $USERNAME:"
+echo "Enter password for user $USERNAME:"
 passwd "$USERNAME"
 
 echo "%wheel ALL=(ALL) ALL" > /etc/sudoers.d/wheel
@@ -194,7 +194,7 @@ chmod 440 /etc/sudoers.d/wheel
 # ------------------------------------------------------------
 # PACMAN TWEAKS
 # ------------------------------------------------------------
-msg "Тюнинг pacman..."
+msg "Tweaking pacman..."
 sed -i 's/#Color/Color/' /etc/pacman.conf
 sed -i 's/#ParallelDownloads/ParallelDownloads/' /etc/pacman.conf
 sed -i 's/^#VerbosePkgLists/VerbosePkgLists/' /etc/pacman.conf
@@ -202,16 +202,16 @@ sed -i 's/^#VerbosePkgLists/VerbosePkgLists/' /etc/pacman.conf
 # ------------------------------------------------------------
 # NETWORK
 # ------------------------------------------------------------
-msg "Включаю NetworkManager..."
+msg "Enabling NetworkManager..."
 systemctl enable NetworkManager
 
 # ------------------------------------------------------------
 # BOOTLOADER: SYSTEMD-BOOT (linux-zen)
 # ------------------------------------------------------------
-msg "Установка systemd-boot..."
+msg "Installing systemd-boot..."
 bootctl install
 
-msg "Конфигурация загрузчика..."
+msg "Configuring bootloader..."
 cat > /boot/loader/loader.conf << EOFL
 default arch.conf
 timeout 3
@@ -219,12 +219,12 @@ console-mode max
 editor no
 EOFL
 
-msg "Определяю UUID корневого раздела..."
+msg "Detecting root partition UUID..."
 ROOT_DEV=$(findmnt -no SOURCE /)
 ROOT_UUID=$(blkid -s UUID -o value "$ROOT_DEV")
 
 if [ -z "$ROOT_UUID" ]; then
-    err "Не удалось определить UUID корневого раздела."
+    err "Failed to detect root partition UUID."
     exit 1
 fi
 
@@ -240,7 +240,7 @@ EOFL
 # ------------------------------------------------------------
 # GPU DRIVERS + WAYLAND/HYPRLAND STACK
 # ------------------------------------------------------------
-msg "Установка GPU и Wayland стеков..."
+msg "Installing GPU drivers and Wayland stack..."
 pacman -S --noconfirm \
     mesa vulkan-radeon mesa-utils \
     nvidia nvidia-utils nvidia-prime \
@@ -268,13 +268,13 @@ else
     echo 'MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)' >> /etc/mkinitcpio.conf
 fi
 
-msg "Пересобираю initramfs..."
+msg "Regenerating initramfs..."
 mkinitcpio -P
 
 # ------------------------------------------------------------
 # AUTOLOGIN + HYPRLAND AUTOSTART
 # ------------------------------------------------------------
-msg "Настройка автологина на TTY1..."
+msg "Configuring autologin on TTY1..."
 mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat > /etc/systemd/system/getty@tty1.service.d/override.conf << EOFL
 [Service]
@@ -283,7 +283,7 @@ ExecStart=-/usr/bin/agetty --autologin $USERNAME --noclear %I \$TERM
 EOFL
 
 # Hyprland autostart via .bash_profile
-msg "Настройка автозапуска Hyprland..."
+msg "Configuring Hyprland autostart..."
 cat > /home/$USERNAME/.bash_profile << 'EOFL'
 if [ -z "$DISPLAY" ] && [ "${XDG_VTNR}" -eq 1 ]; then
     exec Hyprland
@@ -294,7 +294,7 @@ chown "$USERNAME:$USERNAME" /home/$USERNAME/.bash_profile
 # ------------------------------------------------------------
 # HYPRLAND CONFIG (MEDIUM)
 # ------------------------------------------------------------
-msg "Создаю конфиг Hyprland..."
+msg "Creating Hyprland config..."
 mkdir -p /home/$USERNAME/.config/hypr
 cat > /home/$USERNAME/.config/hypr/hyprland.conf << 'EOFL'
 # Wayland & toolkits ENV
@@ -370,7 +370,7 @@ chown -R "$USERNAME:$USERNAME" /home/$USERNAME/.config
 # ------------------------------------------------------------
 # AUR + VIVALDI
 # ------------------------------------------------------------
-msg "Установка yay и Vivaldi..."
+msg "Installing yay and Vivaldi..."
 pacman -S --noconfirm --needed git base-devel
 
 sudo -u "$USERNAME" bash << 'EOSU'
@@ -384,17 +384,17 @@ EOSU
 # ------------------------------------------------------------
 # JOURNALD + PACMAN CACHE
 # ------------------------------------------------------------
-msg "Ограничение размера journald..."
+msg "Limiting journald size..."
 mkdir -p /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/size.conf << EOFL
 [Journal]
 SystemMaxUse=64M
 EOFL
 
-msg "Включаю таймер очистки pacman-кэша..."
+msg "Enabling pacman cache cleanup timer..."
 systemctl enable paccache.timer
 
-ok "Настройка системы в chroot завершена."
+ok "Chroot configuration complete."
 EOF
 
 chmod +x /mnt/root/chroot-setup.sh
@@ -402,14 +402,14 @@ chmod +x /mnt/root/chroot-setup.sh
 # ------------------------------------------------------------
 # RUN CHROOT
 # ------------------------------------------------------------
-msg "Запуск chroot-скрипта..."
+msg "Running chroot setup script..."
 arch-chroot /mnt /root/chroot-setup.sh
 
 # ------------------------------------------------------------
 # FINISH
 # ------------------------------------------------------------
-msg "Размонтирую разделы..."
+msg "Unmounting target filesystems..."
 umount -R /mnt || true
 
-ok "Установка завершена! Введите 'reboot' для перезагрузки."
-echo "После загрузки система автоматически войдёт в пользователя и запустит Hyprland."
+ok "Installation complete! Type 'reboot' to restart."
+echo "After boot, the system will log in automatically and start Hyprland."
