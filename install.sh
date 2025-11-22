@@ -117,20 +117,13 @@ mkswap /mnt/swapfile
 swapon /mnt/swapfile
 
 # ------------------------------------------------------------
-# MIRROR OPTIMIZATION
-# ------------------------------------------------------------
-msg "Optimizing mirrors (reflector, Russia)..."
-pacman -Sy --noconfirm reflector
-reflector --country Russia --latest 10 --sort rate --save /etc/pacman.d/mirrorlist
-
-# ------------------------------------------------------------
 # INSTALL BASE SYSTEM (linux-zen)
 # ------------------------------------------------------------
 msg "Installing base system (linux-zen)..."
 pacstrap /mnt \
     base linux-zen linux-zen-headers linux-firmware base-devel \
     networkmanager nano amd-ucode intel-ucode efibootmgr git sudo \
-    man-db man-pages reflector xdg-user-dirs xdg-utils pacman-contrib
+    man-db man-pages xdg-user-dirs xdg-utils pacman-contrib
 
 # ------------------------------------------------------------
 # FSTAB
@@ -244,9 +237,9 @@ msg "Installing GPU drivers and Wayland stack..."
 pacman -S --noconfirm \
     mesa vulkan-radeon mesa-utils \
     nvidia nvidia-utils nvidia-prime \
-    pipewire pipewire-pulse wireplumber \
-    hyprland waybar rofi-lbonn-wayland kitty \
-    swaybg swaylock-effects \
+    pipewire pipewire-alsa pipewire-pulse wireplumber \
+    hyprland waybar rofi-wayland kitty \
+    swaybg swaylock \
     xdg-desktop-portal xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
     mako wl-clipboard grim slurp brightnessctl \
     polkit-gnome bluez bluez-utils fwupd
@@ -362,7 +355,7 @@ bind = $mainMod, 8, workspace,8
 bind = $mainMod, 9, workspace,9
 bind = $mainMod, 0, workspace,10
 
-bind = SUPER, L, exec, swaylock-effects --clock --indicator --screenshots --effect-blur 8x4
+bind = SUPER, L, exec, swaylock --color 1e1e2e
 EOFL
 
 chown -R "$USERNAME:$USERNAME" /home/$USERNAME/.config
