@@ -233,36 +233,57 @@ EOFL
 # ------------------------------------------------------------
 # GPU DRIVERS + WAYLAND/HYPRLAND STACK
 # ------------------------------------------------------------
+msg "Detecting GPU vendor..."
+if lspci -nn | grep -qi "vga.*nvidia"; then
+    GPU_VENDOR="nvidia"
+    ok "NVIDIA GPU detected."
+else
+    GPU_VENDOR="other"
+    ok "Non-NVIDIA GPU detected; skipping proprietary drivers."
+fi
+
 msg "Installing GPU drivers and Wayland stack..."
-pacman -S --noconfirm \
-    mesa vulkan-radeon mesa-utils \
-    nvidia nvidia-utils nvidia-prime \
-    pipewire pipewire-alsa pipewire-pulse wireplumber \
-    hyprland waybar rofi-wayland kitty \
-    swaybg swaylock \
-    xdg-desktop-portal xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
-    mako wl-clipboard grim slurp brightnessctl \
+GPU_COMMON_PKGS=(
+    mesa vulkan-radeon mesa-utils
+    pipewire pipewire-alsa pipewire-pulse wireplumber
+    hyprland waybar rofi-wayland kitty
+    swaybg swaylock
+    xdg-desktop-portal xdg-desktop-portal-hyprland xdg-desktop-portal-gtk
+    mako wl-clipboard grim slurp brightnessctl
     polkit-gnome bluez bluez-utils fwupd
+)
 
-systemctl enable bluetooth
-systemctl enable --now fwupd.service
+if [[ "$GPU_VENDOR" == "nvidia" ]]; then
+    GPU_DRIVER_PKGS=(nvidia nvidia-utils nvidia-prime)
+    pacman -S --noconfirm "${GPU_COMMON_PKGS[@]}" "${GPU_DRIVER_PKGS[@]}"
 
-# NVIDIA POWER FIX
-mkdir -p /etc/modprobe.d
-cat > /etc/modprobe.d/nvidia-power.conf << EOFL
+    systemctl enable bluetooth
+    systemctl enable --now fwupd.service
+
+    # NVIDIA POWER FIX
+    mkdir -p /etc/modprobe.d
+    cat > /etc/modprobe.d/nvidia-power.conf << EOFL
 options nvidia-drm modeset=1
 options nvidia NVreg_PreserveVideoMemoryAllocations=1
 EOFL
 
-# Add NVIDIA modules to initramfs for early KMS
-if grep -q '^MODULES=' /etc/mkinitcpio.conf; then
-    sed -i 's/^MODULES=.*/MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' /etc/mkinitcpio.conf
-else
-    echo 'MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)' >> /etc/mkinitcpio.conf
-fi
+    # Add NVIDIA modules to initramfs for early KMS
+    if grep -q '^MODULES=' /etc/mkinitcpio.conf; then
+        sed -i 's/^MODULES=.*/MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' /etc/mkinitcpio.conf
+    else
+        echo 'MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)' >> /etc/mkinitcpio.conf
+    fi
 
-msg "Regenerating initramfs..."
-mkinitcpio -P
+    msg "Regenerating initramfs with NVIDIA modules..."
+    if ! mkinitcpio -P; then
+        err "mkinitcpio failed after adding NVIDIA modules. Check for driver/kernel mismatches."
+        exit 1
+    fi
+else
+    pacman -S --noconfirm "${GPU_COMMON_PKGS[@]}"
+    systemctl enable bluetooth
+    systemctl enable --now fwupd.service
+fi
 
 # ------------------------------------------------------------
 # AUTOLOGIN + HYPRLAND AUTOSTART
@@ -279,6 +300,15 @@ EOFL
 msg "Configuring Hyprland autostart..."
 cat > /home/$USERNAME/.bash_profile << 'EOFL'
 if [ -z "$DISPLAY" ] && [ "${XDG_VTNR}" -eq 1 ]; then
+    if [ -z "${XDG_RUNTIME_DIR}" ]; then
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    fi
+
+    if [ ! -d "${XDG_RUNTIME_DIR}" ]; then
+        mkdir -p "${XDG_RUNTIME_DIR}"
+        chmod 700 "${XDG_RUNTIME_DIR}"
+    fi
+
     exec Hyprland
 fi
 EOFL
