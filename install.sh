@@ -26,6 +26,11 @@
 
 set -e
 
+if [[ $EUID -ne 0 ]]; then
+    echo "This installer must be run as root." >&2
+    exit 1
+fi
+
 BLUE="\033[34m"
 GREEN="\033[32m"
 RED="\033[31m"
@@ -63,6 +68,11 @@ msg "Select the target disk for installation:"
 lsblk -dpno NAME,SIZE,TYPE | grep "disk"
 echo
 read -rp "Enter disk (e.g. nvme0n1 or /dev/nvme0n1): " DISK
+
+if [[ -z "$DISK" ]]; then
+    err "No disk provided."
+    exit 1
+fi
 
 # normalize to /dev/...
 if [[ "$DISK" != /dev/* ]]; then
@@ -133,7 +143,9 @@ pacstrap /mnt \
 # ------------------------------------------------------------
 msg "Generating fstab..."
 genfstab -U /mnt >> /mnt/etc/fstab
-echo "/swapfile none swap defaults 0 0" >> /mnt/etc/fstab
+if ! grep -q "^/swapfile" /mnt/etc/fstab; then
+    echo "/swapfile none swap defaults 0 0" >> /mnt/etc/fstab
+fi
 
 # ------------------------------------------------------------
 # CREATE CHROOT INSTALLER
@@ -177,6 +189,9 @@ EOFS
 # ------------------------------------------------------------
 msg "Creating user..."
 read -p "Enter username: " USERNAME
+for grp in wheel video audio storage input seat; do
+    getent group "$grp" >/dev/null || groupadd "$grp"
+done
 useradd -m -G wheel,video,audio,storage,input,seat -s /bin/bash "$USERNAME"
 
 echo "Enter root password:"
@@ -241,7 +256,7 @@ pacman -S --noconfirm \
     mesa mesa-utils libva-mesa-driver vulkan-radeon vulkan-intel intel-media-driver \
     pipewire pipewire-alsa pipewire-pulse wireplumber \
     hyprland hyprpaper hypridle hyprlock waybar wofi kitty uwsm \
-    dunst dolphin seatd sddm \
+    dunst dolphin seatd sddm bluez bluez-utils fwupd \
     xdg-desktop-portal xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
     polkit-kde-agent grim slurp wl-clipboard brightnessctl qt5-wayland qt6-wayland gvfs
 
@@ -255,7 +270,7 @@ mkdir -p /etc/sddm.conf.d
 cat > /etc/sddm.conf.d/10-hyprland.conf << EOFL
 [General]
 DisplayServer=wayland
-Session=hyprland
+Session=hyprland.desktop
 
 [Wayland]
 EnableHiDPI=true
@@ -399,6 +414,8 @@ EOFL
 msg "Enabling pacman cache cleanup timer..."
 systemctl enable paccache.timer
 
+rm /root/chroot-setup.sh
+
 ok "Chroot configuration complete."
 EOF
 
@@ -414,6 +431,7 @@ arch-chroot /mnt /root/chroot-setup.sh
 # FINISH
 # ------------------------------------------------------------
 msg "Unmounting target filesystems..."
+swapoff /mnt/swapfile || true
 umount -R /mnt || true
 
 ok "Installation complete! Type 'reboot' to restart."
