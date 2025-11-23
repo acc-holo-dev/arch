@@ -16,6 +16,9 @@
 # ------------------------------------------------------------
 # pacman -Sy --noconfirm git
 # git clone https://github.com/acc-holo-dev/arch.git
+# После установки системы к Wi‑Fi можно подключиться так:
+#   nmcli device wifi list
+#   nmcli device wifi connect "SSID" password "PASSWORD"
 # cd arch
 # chmod +x install.sh
 # ./install.sh
@@ -184,6 +187,16 @@ passwd "$USERNAME"
 echo "%wheel ALL=(ALL) ALL" > /etc/sudoers.d/wheel
 chmod 440 /etc/sudoers.d/wheel
 
+# Автовход в tty1 для созданного пользователя
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat > /etc/systemd/system/getty@tty1.service.d/override.conf << EOFS
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin $USERNAME --noclear --keep-baud 115200,38400,9600 %I linux
+Type=simple
+EOFS
+systemctl enable getty@tty1
+
 # ------------------------------------------------------------
 # PACMAN TWEAKS
 # ------------------------------------------------------------
@@ -231,88 +244,20 @@ options root=UUID=$ROOT_UUID rw quiet splash amd_pstate=active
 EOFL
 
 # ------------------------------------------------------------
-# GPU DRIVERS + WAYLAND/HYPRLAND STACK
+# GPU DRIVERS + WAYLAND/HYPRLAND STACK (AMD/Radeon focused)
 # ------------------------------------------------------------
-msg "Detecting GPU vendor..."
-if lspci -nn | grep -qi "vga.*nvidia"; then
-    GPU_VENDOR="nvidia"
-    ok "NVIDIA GPU detected."
-else
-    GPU_VENDOR="other"
-    ok "Non-NVIDIA GPU detected; skipping proprietary drivers."
-fi
-
-msg "Installing GPU drivers and Wayland stack..."
-GPU_COMMON_PKGS=(
-    mesa vulkan-radeon mesa-utils
-    pipewire pipewire-alsa pipewire-pulse wireplumber
-    hyprland waybar rofi-wayland kitty
-    swaybg swaylock
-    xdg-desktop-portal xdg-desktop-portal-hyprland xdg-desktop-portal-gtk
-    mako wl-clipboard grim slurp brightnessctl
+msg "Installing GPU drivers and Wayland stack for AMD/Radeon..."
+pacman -S --noconfirm \
+    mesa vulkan-radeon mesa-utils \
+    pipewire pipewire-alsa pipewire-pulse wireplumber \
+    hyprland waybar rofi-wayland kitty \
+    swaybg swaylock \
+    xdg-desktop-portal xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
+    mako wl-clipboard grim slurp brightnessctl \
     polkit-gnome bluez bluez-utils fwupd
-)
 
-if [[ "$GPU_VENDOR" == "nvidia" ]]; then
-    GPU_DRIVER_PKGS=(nvidia nvidia-utils nvidia-prime)
-    pacman -S --noconfirm "${GPU_COMMON_PKGS[@]}" "${GPU_DRIVER_PKGS[@]}"
-
-    systemctl enable bluetooth
-    systemctl enable --now fwupd.service
-
-    # NVIDIA POWER FIX
-    mkdir -p /etc/modprobe.d
-    cat > /etc/modprobe.d/nvidia-power.conf << EOFL
-options nvidia-drm modeset=1
-options nvidia NVreg_PreserveVideoMemoryAllocations=1
-EOFL
-
-    # Add NVIDIA modules to initramfs for early KMS
-    if grep -q '^MODULES=' /etc/mkinitcpio.conf; then
-        sed -i 's/^MODULES=.*/MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' /etc/mkinitcpio.conf
-    else
-        echo 'MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)' >> /etc/mkinitcpio.conf
-    fi
-
-    msg "Regenerating initramfs with NVIDIA modules..."
-    if ! mkinitcpio -P; then
-        err "mkinitcpio failed after adding NVIDIA modules. Check for driver/kernel mismatches."
-        exit 1
-    fi
-else
-    pacman -S --noconfirm "${GPU_COMMON_PKGS[@]}"
-    systemctl enable bluetooth
-    systemctl enable --now fwupd.service
-fi
-
-# ------------------------------------------------------------
-# AUTOLOGIN + HYPRLAND AUTOSTART
-# ------------------------------------------------------------
-msg "Configuring autologin on TTY1..."
-mkdir -p /etc/systemd/system/getty@tty1.service.d
-cat > /etc/systemd/system/getty@tty1.service.d/override.conf << EOFL
-[Service]
-ExecStart=
-ExecStart=-/usr/bin/agetty --autologin $USERNAME --noclear %I \$TERM
-EOFL
-
-# Hyprland autostart via .bash_profile
-msg "Configuring Hyprland autostart..."
-cat > /home/$USERNAME/.bash_profile << 'EOFL'
-if [ -z "$DISPLAY" ] && [ "${XDG_VTNR}" -eq 1 ]; then
-    if [ -z "${XDG_RUNTIME_DIR}" ]; then
-        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-    fi
-
-    if [ ! -d "${XDG_RUNTIME_DIR}" ]; then
-        mkdir -p "${XDG_RUNTIME_DIR}"
-        chmod 700 "${XDG_RUNTIME_DIR}"
-    fi
-
-    exec Hyprland
-fi
-EOFL
-chown "$USERNAME:$USERNAME" /home/$USERNAME/.bash_profile
+systemctl enable bluetooth
+systemctl enable --now fwupd.service
 
 # ------------------------------------------------------------
 # HYPRLAND CONFIG (MEDIUM)
@@ -326,15 +271,16 @@ env = XDG_SESSION_TYPE,wayland
 env = GTK_USE_PORTAL,1
 env = QT_QPA_PLATFORM,wayland
 env = QT_WAYLAND_DISABLE_WINDOWDECORATION,1
-env = NIXOS_OZONE_WL,1
-env = ELECTRON_OZONE_PLATFORM_HINT,auto
-env = WLR_NO_HARDWARE_CURSORS,1
-env = __GLX_VENDOR_LIBRARY_NAME,nvidia
-env = GBM_BACKEND,nvidia-drm
-env = LIBVA_DRIVER_NAME,nvidia
+env = MOZ_ENABLE_WAYLAND,1
+env = XDG_SESSION_DESKTOP,Hyprland
+
+# Стабильное окружение по рекомендациям Archinstall/Hyprland
+exec-once = dbus-update-activation-environment --systemd --all
+exec-once = systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE XDG_SESSION_DESKTOP
+exec-once = systemctl --user start pipewire pipewire-pulse wireplumber
+
 env = SDL_VIDEODRIVER,wayland
 env = CLUTTER_BACKEND,wayland
-env = MOZ_ENABLE_WAYLAND,1
 
 monitor=,preferred,auto,1
 
@@ -366,14 +312,22 @@ exec-once = /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
 
 $mainMod = SUPER
 
+# Запуск терминала
 bind = $mainMod, RETURN, exec, kitty
+# Меню приложений (drun)
 bind = $mainMod, D, exec, rofi -show drun
+# Завершить активное окно
 bind = $mainMod, Q, killactive
+# Переключить плавающее окно
 bind = $mainMod, F, togglefloating
+# Меню команд (run)
 bind = $mainMod, R, exec, rofi -show run
+# Псевдоплитка (split/pseudo)
 bind = $mainMod, P, pseudo
+# Выход из сессии Hyprland
 bind = $mainMod, M, exit
 
+# Переключение рабочих столов
 bind = $mainMod, 1, workspace,1
 bind = $mainMod, 2, workspace,2
 bind = $mainMod, 3, workspace,3
@@ -385,23 +339,23 @@ bind = $mainMod, 8, workspace,8
 bind = $mainMod, 9, workspace,9
 bind = $mainMod, 0, workspace,10
 
+# Блокировка экрана
 bind = SUPER, L, exec, swaylock --color 1e1e2e
 EOFL
 
 chown -R "$USERNAME:$USERNAME" /home/$USERNAME/.config
 
 # ------------------------------------------------------------
-# AUR + VIVALDI
+# AUR + UTILS
 # ------------------------------------------------------------
-msg "Installing yay and Vivaldi..."
-pacman -S --noconfirm --needed git base-devel
+msg "Installing yay (AUR helper) and Google Chrome из pacman..."
+pacman -S --noconfirm --needed git base-devel google-chrome
 
 sudo -u "$USERNAME" bash << 'EOSU'
 cd "$HOME"
 git clone https://aur.archlinux.org/yay.git
 cd yay
 makepkg -si --noconfirm
-yay -S --noconfirm vivaldi vivaldi-ffmpeg-codecs
 EOSU
 
 # ------------------------------------------------------------
@@ -435,4 +389,4 @@ msg "Unmounting target filesystems..."
 umount -R /mnt || true
 
 ok "Installation complete! Type 'reboot' to restart."
-echo "After boot, the system will log in automatically and start Hyprland."
+echo "After reboot, log in normally and start Hyprland manually with 'Hyprland'."
