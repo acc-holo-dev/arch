@@ -177,7 +177,7 @@ EOFS
 # ------------------------------------------------------------
 msg "Creating user..."
 read -p "Enter username: " USERNAME
-useradd -m -G wheel,video,audio,storage,input -s /bin/bash "$USERNAME"
+useradd -m -G wheel,video,audio,storage,input,seat -s /bin/bash "$USERNAME"
 
 echo "Enter root password:"
 passwd
@@ -186,16 +186,6 @@ passwd "$USERNAME"
 
 echo "%wheel ALL=(ALL) ALL" > /etc/sudoers.d/wheel
 chmod 440 /etc/sudoers.d/wheel
-
-# Автовход в tty1 для созданного пользователя
-mkdir -p /etc/systemd/system/getty@tty1.service.d
-cat > /etc/systemd/system/getty@tty1.service.d/override.conf << EOFS
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin $USERNAME --noclear --keep-baud 115200,38400,9600 %I linux
-Type=simple
-EOFS
-systemctl enable getty@tty1
 
 # ------------------------------------------------------------
 # PACMAN TWEAKS
@@ -246,21 +236,33 @@ EOFL
 # ------------------------------------------------------------
 # GPU DRIVERS + WAYLAND/HYPRLAND STACK (AMD/Radeon focused)
 # ------------------------------------------------------------
-msg "Installing GPU drivers and Wayland stack for AMD/Radeon..."
+msg "Installing GPU drivers and Wayland stack for Hyprland..."
 pacman -S --noconfirm \
-    mesa vulkan-radeon mesa-utils \
+    mesa mesa-utils libva-mesa-driver vulkan-radeon vulkan-intel intel-media-driver \
     pipewire pipewire-alsa pipewire-pulse wireplumber \
-    hyprland waybar rofi-wayland kitty \
-    swaybg swaylock \
+    hyprland hyprpaper hypridle hyprlock waybar wofi kitty uwsm \
+    dunst dolphin seatd sddm \
     xdg-desktop-portal xdg-desktop-portal-hyprland xdg-desktop-portal-gtk \
-    mako wl-clipboard grim slurp brightnessctl \
-    polkit-gnome bluez bluez-utils fwupd
+    polkit-kde-agent grim slurp wl-clipboard brightnessctl qt5-wayland qt6-wayland gvfs
 
 systemctl enable bluetooth
 systemctl enable --now fwupd.service
+systemctl enable seatd
+systemctl enable sddm
+
+msg "Configuring SDDM to start Hyprland on Wayland..."
+mkdir -p /etc/sddm.conf.d
+cat > /etc/sddm.conf.d/10-hyprland.conf << EOFL
+[General]
+DisplayServer=wayland
+Session=hyprland
+
+[Wayland]
+EnableHiDPI=true
+EOFL
 
 # ------------------------------------------------------------
-# HYPRLAND CONFIG (MEDIUM)
+# HYPRLAND CONFIG (приближено к archinstall)
 # ------------------------------------------------------------
 msg "Creating Hyprland config..."
 mkdir -p /home/$USERNAME/.config/hypr
@@ -306,22 +308,23 @@ decoration {
 }
 
 exec-once = waybar
-exec-once = mako
-exec-once = swaybg -c "#1e1e2e"
-exec-once = /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+exec-once = dunst
+exec-once = hyprpaper
+exec-once = hypridle
+exec-once = /usr/lib/polkit-kde-authentication-agent-1
 
 $mainMod = SUPER
 
 # Запуск терминала
 bind = $mainMod, RETURN, exec, kitty
 # Меню приложений (drun)
-bind = $mainMod, D, exec, rofi -show drun
+bind = $mainMod, D, exec, wofi --show drun
 # Завершить активное окно
 bind = $mainMod, Q, killactive
 # Переключить плавающее окно
 bind = $mainMod, F, togglefloating
 # Меню команд (run)
-bind = $mainMod, R, exec, rofi -show run
+bind = $mainMod, R, exec, wofi --show run
 # Псевдоплитка (split/pseudo)
 bind = $mainMod, P, pseudo
 # Выход из сессии Hyprland
@@ -340,22 +343,47 @@ bind = $mainMod, 9, workspace,9
 bind = $mainMod, 0, workspace,10
 
 # Блокировка экрана
-bind = SUPER, L, exec, swaylock --color 1e1e2e
+bind = SUPER, L, exec, hyprlock
 EOFL
+
+mkdir -p /home/$USERNAME/.config/hypr/wallpapers
+cat > /home/$USERNAME/.config/hypr/hyprpaper.conf << 'EOFP'
+preload = ~/.config/hypr/wallpapers/solid.png
+wallpaper = ,~/.config/hypr/wallpapers/solid.png
+splash = false
+EOFP
+
+cat > /home/$USERNAME/.config/hypr/hypridle.conf << 'EOFI'
+general {
+    ignore_dbus_inhibit = false
+}
+
+listener {
+    timeout = 600
+    on-timeout = hyprlock
+}
+EOFI
+
+cat > /home/$USERNAME/.config/hypr/wallpapers/solid.png.base64 << 'EOIMG'
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9YwV7ZkAAAAASUVORK5CYII=
+EOIMG
+base64 -d /home/$USERNAME/.config/hypr/wallpapers/solid.png.base64 > /home/$USERNAME/.config/hypr/wallpapers/solid.png
+rm /home/$USERNAME/.config/hypr/wallpapers/solid.png.base64
 
 chown -R "$USERNAME:$USERNAME" /home/$USERNAME/.config
 
 # ------------------------------------------------------------
 # AUR + UTILS
 # ------------------------------------------------------------
-msg "Installing yay (AUR helper) and Google Chrome из pacman..."
-pacman -S --noconfirm --needed git base-devel google-chrome
+msg "Installing yay (AUR helper) and Google Chrome через AUR..."
+pacman -S --noconfirm --needed git base-devel
 
 sudo -u "$USERNAME" bash << 'EOSU'
 cd "$HOME"
 git clone https://aur.archlinux.org/yay.git
 cd yay
 makepkg -si --noconfirm
+yay -S --noconfirm google-chrome
 EOSU
 
 # ------------------------------------------------------------
@@ -389,4 +417,4 @@ msg "Unmounting target filesystems..."
 umount -R /mnt || true
 
 ok "Installation complete! Type 'reboot' to restart."
-echo "After reboot, log in normally and start Hyprland manually with 'Hyprland'."
+echo "After reboot, log in via SDDM; Hyprland session should be available by default."
